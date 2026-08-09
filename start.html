@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>88 Meilen - Zeitreise</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  html, body {
+    width:100%; height:100%; overflow:hidden;
+    background:#000;
+    font-family:-apple-system, "Helvetica Neue", Arial, sans-serif;
+    touch-action:none;
+  }
+  #wrap {
+    position:relative;
+    width:100vw; height:100vh;
+    display:flex; align-items:center; justify-content:center;
+    background:#000;
+  }
+  canvas {
+    display:block;
+    touch-action:none;
+    max-width:100vw; max-height:100vh;
+  }
+  #hud {
+    position:absolute; top:0; left:0; width:100%; pointer-events:none;
+    display:flex; justify-content:space-between; align-items:flex-start;
+    padding: max(14px, env(safe-area-inset-top)) 18px 0 18px;
+    z-index:5;
+  }
+  .panel {
+    background:rgba(10,4,30,0.55);
+    border:2px solid #ff8c1a;
+    border-radius:10px;
+    padding:8px 14px;
+    box-shadow:0 0 14px rgba(255,140,26,0.5), inset 0 0 10px rgba(255,140,26,0.15);
+    color:#ffd7a3;
+    font-weight:700;
+    letter-spacing:1px;
+  }
+  #speedLabel { font-size:15px; opacity:.85; }
+  #speedVal { font-size:30px; color:#39f6ff; text-shadow:0 0 10px #39f6ff; }
+  #speedVal.warn { color:#ff3860; text-shadow:0 0 10px #ff3860; }
+  #distPanel { text-align:right; font-size:14px; }
+
+  #speedBarOuter {
+    position:absolute; left:50%; transform:translateX(-50%);
+    top: max(14px, env(safe-area-inset-top));
+    width:min(70vw, 420px); height:26px;
+    border:2px solid #39f6ff; border-radius:14px;
+    background:rgba(0,0,0,0.4);
+    box-shadow:0 0 14px rgba(57,246,255,0.5);
+    overflow:hidden;
+    z-index:5;
+  }
+  #speedBarFill {
+    height:100%; width:0%;
+    background:linear-gradient(90deg,#ff8c1a,#ffd21a,#39f6ff);
+    transition:width .08s linear;
+  }
+  #speedBarText {
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    font-size:13px; font-weight:800; color:#fff; text-shadow:0 1px 3px #000;
+    letter-spacing:1px;
+  }
+
+  #msgOverlay {
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center; flex-direction:column;
+    background:rgba(0,0,0,0.72);
+    z-index:20; text-align:center; padding:20px;
+    pointer-events:auto;
+  }
+  #msgOverlay h1 {
+    font-size:clamp(28px,6vw,54px);
+    color:#39f6ff; text-shadow:0 0 20px #39f6ff, 0 0 40px #ff8c1a;
+    margin-bottom:12px;
+    letter-spacing:2px;
+  }
+  #msgOverlay p {
+    color:#ffd7a3; font-size:clamp(14px,3vw,18px); margin-bottom:22px; max-width:520px;
+  }
+  #msgOverlay button {
+    font-size:18px; font-weight:800; letter-spacing:1px;
+    padding:14px 34px; border-radius:30px; border:2px solid #ff8c1a;
+    background:linear-gradient(180deg,#ff8c1a,#c8501a);
+    color:#fff; box-shadow:0 0 20px rgba(255,140,26,0.7);
+  }
+  #startBtn { pointer-events:auto; }
+
+  #touchHint {
+    position:absolute; bottom: max(16px, env(safe-area-inset-bottom));
+    left:0; width:100%; text-align:center;
+    color:rgba(255,255,255,0.55); font-size:12px; letter-spacing:1px;
+    z-index:5; pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+
+  <div id="hud">
+    <div class="panel">
+      <div id="speedLabel">TEMPO</div>
+      <div id="speedVal">0<span style="font-size:14px;"> mph</span></div>
+    </div>
+    <div class="panel" id="distPanel">
+      <div>KOLLISIONEN</div>
+      <div id="hitVal" style="font-size:22px;color:#ff8c1a;">0</div>
+    </div>
+  </div>
+
+  <div id="speedBarOuter">
+    <div id="speedBarFill"></div>
+    <div id="speedBarText">0 / 88 mph</div>
+  </div>
+
+  <div id="touchHint">Delorean mit dem Finger nach links / rechts ziehen</div>
+
+  <div id="msgOverlay">
+    <h1 id="msgTitle">88 MEILEN</h1>
+    <p id="msgText">Beschleunige den DeLorean auf 88 mph und weiche Hindernissen aus.
+    Jede Kollision bremst dich ab! Erreiche 88 mph, um die Zeitreise zu starten.</p>
+    <button id="startBtn">LOS GEHT'S</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  let W, H, DPR;
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- Game state ----------
+  const ROAD_MARGIN_RATIO = 0.16; // margin from each side as ratio of width
+  let state = 'idle'; // idle, playing, won
+  let speed = 0; // mph
+  const MAX_SPEED = 88;
+  const ACCEL = 6.0;
+  const HIT_PENALTY = 14;
+  let hits = 0;
+  let roadOffset = 0;
+  let flashTimer = 0;
+  let invulnTimer = 0;
+  let winTimer = 0;
+  let lightningTimer = 0;
+
+  let carX = 0.5; // 0..1 across road
+  let carTargetX = 0.5;
+  let prevCarX = 0.5;
+  let carTilt = 0;
+  let dragging = false;
+
+  let obstacles = [];
+  let spawnTimer = 0;
+
+  const speedValEl = document.getElementById('speedVal');
+  const speedBarFill = document.getElementById('speedBarFill');
+  const speedBarText = document.getElementById('speedBarText');
+  const hitValEl = document.getElementById('hitVal');
+  const msgOverlay = document.getElementById('msgOverlay');
+  const msgTitle = document.getElementById('msgTitle');
+  const msgText = document.getElementById('msgText');
+  const startBtn = document.getElementById('startBtn');
+  const touchHint = document.getElementById('touchHint');
+
+  function roadBounds(){
+    const margin = W * ROAD_MARGIN_RATIO;
+    return { left: margin, right: W - margin, width: W - margin*2 };
+  }
+  function roadX(normX){ const b = roadBounds(); return b.left + normX*b.width; }
+  function roadY(normY){ return normY*H; }
+  function carScale(){ const b = roadBounds(); return (b.width*0.20)/88; }
+
+  function resetGame(){
+    speed = 0;
+    hits = 0;
+    obstacles = [];
+    spawnTimer = 0;
+    carX = 0.5; carTargetX = 0.5; prevCarX = 0.5; carTilt = 0;
+    invulnTimer = 0;
+    flashTimer = 0;
+    winTimer = 0;
+    lightningTimer = 0;
+    hitValEl.textContent = '0';
+    updateSpeedUI();
+  }
+
+  function updateSpeedUI(){
+    const pct = Math.max(0, Math.min(100, (speed / MAX_SPEED) * 100));
+    speedBarFill.style.width = pct + '%';
+    speedBarText.textContent = Math.floor(speed) + ' / 88 mph';
+    if (speed >= 70) speedValEl.classList.add('warn'); else speedValEl.classList.remove('warn');
+    speedValEl.innerHTML = Math.floor(speed) + '<span style="font-size:14px;"> mph</span>';
+  }
+
+  // ---------- Input ----------
+  function xToNorm(clientX){
+    const rect = canvas.getBoundingClientRect();
+    const b = roadBounds();
+    let px = clientX - rect.left;
+    let n = (px - b.left) / b.width;
+    return Math.max(0, Math.min(1, n));
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    carTargetX = xToNorm(e.clientX);
+    touchHint.style.opacity = '0';
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    carTargetX = xToNorm(e.clientX);
+  });
+  window.addEventListener('pointerup', () => { dragging = false; });
+  window.addEventListener('pointercancel', () => { dragging = false; });
+
+  let keyLeft=false, keyRight=false;
+  window.addEventListener('keydown', (e)=>{
+    if(e.key==='ArrowLeft') keyLeft=true;
+    if(e.key==='ArrowRight') keyRight=true;
+  });
+  window.addEventListener('keyup', (e)=>{
+    if(e.key==='ArrowLeft') keyLeft=false;
+    if(e.key==='ArrowRight') keyRight=false;
+  });
+
+  // ---------- Obstacles ----------
+  const OBSTACLE_TYPES = ['cone','barrel','crate','car'];
+  function spawnObstacle(){
+    const type = OBSTACLE_TYPES[Math.floor(Math.random()*OBSTACLE_TYPES.length)];
+    const laneX = 0.08 + Math.random()*0.84;
+    let w;
+    switch(type){
+      case 'cone': w=0.05; break;
+      case 'barrel': w=0.06; break;
+      case 'crate': w=0.07; break;
+      case 'car': w=0.14; break;
+    }
+    obstacles.push({ type, x: laneX, w, y: -0.08, hit:false });
+  }
+
+  // ---------- Background (Vogelperspektive) ----------
+  function drawBackground(t){
+    const grad = ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0, '#0a0128');
+    grad.addColorStop(0.5, '#1c0a3a');
+    grad.addColorStop(1, '#0a0128');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,W,H);
+
+    // stars
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    for(let i=0;i<50;i++){
+      const sx = (i*137) % W;
+      const sy = (i*89 + (t*0.01)) % H;
+      ctx.fillRect(sx, sy, 1.5, 1.5);
+    }
+
+    // side "grass" scan grid outside road, scrolling with speed
+    const b = roadBounds();
+    ctx.strokeStyle = 'rgba(255,60,140,0.18)';
+    ctx.lineWidth = 1;
+    const gridSize = 46;
+    const off = roadOffset % gridSize;
+    for (let y = -gridSize; y < H+gridSize; y += gridSize) {
+      const yy = y + off;
+      ctx.beginPath();
+      ctx.moveTo(0, yy); ctx.lineTo(b.left, yy);
+      ctx.moveTo(b.right, yy); ctx.lineTo(W, yy);
+      ctx.stroke();
+    }
+  }
+
+  // ---------- Road (Vogelperspektive, gerade nach oben) ----------
+  function drawRoad(){
+    const b = roadBounds();
+    const grad = ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0, '#241041');
+    grad.addColorStop(1, '#150a2c');
+    ctx.fillStyle = grad;
+    ctx.fillRect(b.left, 0, b.width, H);
+
+    // neon road edges
+    ctx.strokeStyle = '#39f6ff';
+    ctx.lineWidth = 4;
+    ctx.shadowColor = '#39f6ff';
+    ctx.shadowBlur = 14;
+    ctx.beginPath(); ctx.moveTo(b.left,0); ctx.lineTo(b.left,H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(b.right,0); ctx.lineTo(b.right,H); ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // scrolling dashed lane dividers (two lanes -> three markers not needed, use 2 dividers)
+    ctx.strokeStyle = 'rgba(255,215,60,0.85)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([28,26]);
+    ctx.lineDashOffset = -roadOffset;
+    [0.33,0.66].forEach(f=>{
+      const x = b.left + b.width*f;
+      ctx.beginPath();
+      ctx.moveTo(x, 0); ctx.lineTo(x, H);
+      ctx.stroke();
+    });
+    ctx.setLineDash([]);
+  }
+
+  // ---------- DeLorean von oben ----------
+  function drawDeloreanTopDown(px, py, scale, tilt){
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(tilt);
+    ctx.scale(scale, scale);
+
+    // Schatten
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.beginPath();
+    ctx.ellipse(3, 6, 42, 56, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // Karosserie (Draufsicht), Nase zeigt nach oben (Fahrtrichtung)
+    ctx.fillStyle = '#cfd4d9';
+    ctx.beginPath();
+    ctx.moveTo(0,-56);
+    ctx.lineTo(20,-40);
+    ctx.lineTo(30,-8);
+    ctx.lineTo(34, 40);
+    ctx.lineTo(22, 54);
+    ctx.lineTo(-22, 54);
+    ctx.lineTo(-34, 40);
+    ctx.lineTo(-30,-8);
+    ctx.lineTo(-20,-40);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#8891a0';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Windschutzscheibe + Dach
+    ctx.fillStyle = 'rgba(57,246,255,0.55)';
+    ctx.beginPath();
+    ctx.moveTo(-14,-32); ctx.lineTo(14,-32); ctx.lineTo(18,-14); ctx.lineTo(-18,-14);
+    ctx.closePath(); ctx.fill();
+
+    ctx.fillStyle = 'rgba(30,34,42,0.9)';
+    ctx.fillRect(-17,-13,34,26);
+
+    ctx.fillStyle = 'rgba(57,246,255,0.35)';
+    ctx.beginPath();
+    ctx.moveTo(-16,14); ctx.lineTo(16,14); ctx.lineTo(13,26); ctx.lineTo(-13,26);
+    ctx.closePath(); ctx.fill();
+
+    // Scheinwerfer vorne
+    ctx.fillStyle = '#fff7cc';
+    ctx.fillRect(-18,-54,9,7);
+    ctx.fillRect(9,-54,9,7);
+
+    // Rücklichter
+    ctx.fillStyle = '#ff3860';
+    ctx.fillRect(-20,46,9,7);
+    ctx.fillRect(11,46,9,7);
+
+    // Räder
+    ctx.fillStyle = '#111';
+    ctx.fillRect(-38,-30,10,20);
+    ctx.fillRect(28,-30,10,20);
+    ctx.fillRect(-38,20,10,20);
+    ctx.fillRect(28,20,10,20);
+
+    // Flux-Glow bei hoher Geschwindigkeit
+    if (speed > 65) {
+      const glow = Math.min(1,(speed-65)/23);
+      ctx.fillStyle = `rgba(255,140,26,${0.3*glow})`;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 46+18*glow, 66+16*glow, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  function drawObstacleTop(o, px, py, scale){
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.scale(scale, scale);
+    if (o.type === 'cone') {
+      ctx.fillStyle = '#ff6a1a';
+      ctx.beginPath(); ctx.arc(0,0,18,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(0,0,11,0,Math.PI*2); ctx.stroke();
+      ctx.fillStyle = '#ffb27a';
+      ctx.beginPath(); ctx.arc(0,0,4,0,Math.PI*2); ctx.fill();
+    } else if (o.type === 'barrel') {
+      ctx.fillStyle = '#ff3860';
+      ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#fff2'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.stroke();
+      ctx.fillStyle = '#ffd21a';
+      ctx.beginPath(); ctx.arc(0,0,7,0,Math.PI*2); ctx.fill();
+    } else if (o.type === 'crate') {
+      ctx.fillStyle = '#8a5a2a';
+      ctx.fillRect(-20,-20,40,40);
+      ctx.strokeStyle = '#4a2f14'; ctx.lineWidth = 3;
+      ctx.strokeRect(-20,-20,40,40);
+      ctx.beginPath();
+      ctx.moveTo(-20,-20); ctx.lineTo(20,20);
+      ctx.moveTo(20,-20); ctx.lineTo(-20,20);
+      ctx.stroke();
+    } else if (o.type === 'car') {
+      ctx.fillStyle = '#2e6bff';
+      ctx.beginPath();
+      ctx.moveTo(0,-40); ctx.lineTo(22,-22); ctx.lineTo(24,26); ctx.lineTo(16,40);
+      ctx.lineTo(-16,40); ctx.lineTo(-24,26); ctx.lineTo(-22,-22);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(200,230,255,0.6)';
+      ctx.fillRect(-14,-16,28,20);
+      ctx.fillStyle='#111';
+      ctx.fillRect(-28,-16,8,16);
+      ctx.fillRect(20,-16,8,16);
+      ctx.fillRect(-28,10,8,16);
+      ctx.fillRect(20,10,8,16);
+    }
+    ctx.restore();
+  }
+
+  function drawLightning(){
+    if (lightningTimer <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, lightningTimer/0.15);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = '#39f6ff';
+    ctx.shadowBlur = 20;
+    for(let i=0;i<3;i++){
+      let x = W*0.2 + i*W*0.3 + (Math.random()-0.5)*30;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      let y = 0;
+      while(y < H){
+        y += 20+Math.random()*30;
+        x += (Math.random()-0.5)*40;
+        ctx.lineTo(x,y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ---------- Main loop ----------
+  let lastT = performance.now();
+  function loop(now){
+    let dt = (now - lastT)/1000;
+    if (dt > 0.05) dt = 0.05;
+    lastT = now;
+
+    drawBackground(now);
+    drawRoad();
+
+    if (state === 'playing') update(dt);
+
+    const scale = carScale();
+    const sorted = obstacles.slice().sort((a,b)=>a.y-b.y);
+    for (const o of sorted) {
+      const px = roadX(o.x);
+      const py = roadY(o.y);
+      drawObstacleTop(o, px, py, scale*0.9);
+    }
+
+    const carYFrac = 0.8;
+    const carPx = roadX(carX);
+    const carPy = roadY(carYFrac);
+    if (!(invulnTimer > 0 && Math.floor(now/80)%2===0)) {
+      drawDeloreanTopDown(carPx, carPy, scale, carTilt);
+    }
+
+    drawLightning();
+
+    if (flashTimer > 0) {
+      ctx.fillStyle = `rgba(255,40,40,${Math.min(0.5,flashTimer)})`;
+      ctx.fillRect(0,0,W,H);
+    }
+    if (state === 'won') {
+      ctx.fillStyle = `rgba(255,255,255,${Math.min(0.85, winTimer*1.2)})`;
+      ctx.fillRect(0,0,W,H);
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  function update(dt){
+    if (keyLeft) carTargetX -= dt*1.2;
+    if (keyRight) carTargetX += dt*1.2;
+    carTargetX = Math.max(0.05, Math.min(0.95, carTargetX));
+    prevCarX = carX;
+    carX += (carTargetX - carX) * Math.min(1, dt*10);
+    const vel = (carX - prevCarX) / Math.max(dt,0.0001);
+    const targetTilt = Math.max(-0.35, Math.min(0.35, vel*0.9));
+    carTilt += (targetTilt - carTilt) * Math.min(1, dt*8);
+
+    speed += ACCEL * dt * (1 - speed/(MAX_SPEED*1.15));
+    speed = Math.max(0, Math.min(MAX_SPEED, speed));
+
+    roadOffset += (2 + speed*0.6) * dt * 20;
+
+    if (invulnTimer > 0) invulnTimer -= dt;
+    if (flashTimer > 0) flashTimer -= dt*1.6;
+
+    spawnTimer -= dt;
+    const spawnInterval = Math.max(0.35, 1.3 - speed*0.011);
+    if (spawnTimer <= 0) { spawnObstacle(); spawnTimer = spawnInterval + Math.random()*0.25; }
+
+    const moveSpeed = 0.10 + (speed/MAX_SPEED)*0.34;
+    for (const o of obstacles) o.y += moveSpeed * dt;
+    obstacles = obstacles.filter(o => o.y < 1.08);
+
+    if (invulnTimer <= 0) {
+      for (const o of obstacles) {
+        if (o.hit) continue;
+        if (o.y > 0.7 && o.y < 0.9) {
+          const dx = Math.abs(o.x - carX);
+          const collideDist = 0.075 + o.w*0.5;
+          if (dx < collideDist) {
+            o.hit = true;
+            hits++;
+            hitValEl.textContent = hits;
+            speed = Math.max(0, speed - HIT_PENALTY);
+            invulnTimer = 0.9;
+            flashTimer = 1.0;
+          }
+        }
+      }
+    }
+
+    updateSpeedUI();
+    if (speed >= MAX_SPEED - 0.001) triggerWin();
+  }
+
+  function triggerWin(){
+    if (state !== 'playing') return;
+    state = 'won';
+    winTimer = 0;
+    lightningTimer = 0.9;
+    const winInterval = setInterval(()=>{
+      winTimer += 0.05;
+      lightningTimer -= 0.02;
+      if (winTimer >= 1.0) {
+        clearInterval(winInterval);
+        showEndScreen(true);
+      }
+    }, 40);
+  }
+
+  function showEndScreen(won){
+    msgOverlay.style.display = 'flex';
+    msgTitle.textContent = 'GREAT SCOTT!';
+    msgTitle.style.color = '#39f6ff';
+    msgText.textContent = '88 Meilen erreicht nach ' + hits + ' Kollision(en). Die Zeitreise beginnt... Wohin als nächstes?';
+    startBtn.textContent = 'NOCHMAL FAHREN';
+  }
+
+  startBtn.addEventListener('click', () => {
+    msgOverlay.style.display = 'none';
+    resetGame();
+    state = 'playing';
+  });
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
